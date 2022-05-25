@@ -1,0 +1,122 @@
+const {
+	src, dest, watch, series, parallel,
+} = require('gulp')
+const del = require('del')
+const pug = require('gulp-pug')
+const sass = require('gulp-sass')(require('sass'))
+const gcmq = require('gulp-group-css-media-queries')
+const cssNano = require('gulp-cssnano')
+const concat = require('gulp-concat')
+const rename = require('gulp-rename')
+const uglify = require('gulp-uglify')
+const webp = require('gulp-webp')
+const imagemin = require('gulp-imagemin')
+const htmlWebp = require('gulp-webp-html-nosvg')
+const newer = require('gulp-newer')
+const browserSync = require('browser-sync').create()
+const gulpIf = require('gulp-if')
+
+const isBuild = process.argv.includes('--build')
+const isDev = !isBuild
+
+const path = {
+	html: {
+		src: 'src/pug',
+		dist: 'build',
+	},
+	css: {
+		src: 'src/styles',
+		dist: 'build',
+	},
+	js: {
+		src: 'src/js',
+		dist: 'build',
+	},
+	img: {
+		src: 'src/img',
+		dist: 'build/img',
+	},
+	build: 'build',
+	src: 'src',
+}
+
+function htmlGenerator() {
+	return src(`${path.html.src}/pages/*.pug`)
+		.pipe(pug(gulpIf(isDev, { pretty: true })))
+		.pipe(gulpIf(isBuild, htmlWebp()))
+		.pipe(dest(path.html.dist))
+		.pipe(browserSync.stream())
+}
+
+function styleGenerator() {
+	return src(`${path.css.src}/index.scss`)
+		.pipe(sass())
+		.pipe(gulpIf(isBuild, gcmq()))
+		.pipe(gulpIf(isBuild, cssNano()))
+		.pipe(rename('style.css'))
+		.pipe(dest(path.css.dist))
+		.pipe(browserSync.stream())
+}
+
+function bandleJsGenerator() {
+	return src(`${path.js.src}/**/*.js`)
+		.pipe(concat('bundle.js'))
+		.pipe(gulpIf(isBuild, uglify()))
+		.pipe(dest(path.js.dist))
+		.pipe(browserSync.stream())
+}
+
+function imagesConverter() {
+	return src(`${path.img.src}/**/*.{jpg,jpeg,png,gif,}`)
+		.pipe(newer(path.img.dist))
+		.pipe(gulpIf(isBuild, webp()))
+		.pipe(src(`${path.img.src}/**/*.{jpg,jpeg,png,gif,}`))
+		.pipe(newer(path.img.dist))
+		.pipe(gulpIf(isBuild, imagemin()))
+		.pipe(src(`${path.img.src}/**/*.{svg,webp}`))
+		.pipe(newer(path.img.dist))
+		.pipe(dest(path.img.dist))
+		.pipe(browserSync.stream())
+}
+
+function server() {
+	browserSync.init({
+		server: {
+			baseDir: path.build,
+		},
+	})
+
+	watch(`${path.src}/**/*.*`).on('change', browserSync.reload)
+}
+
+function clear() {
+	return del(path.build)
+}
+
+function clearImg() {
+	return del(`${path.build}/img`)
+}
+
+function watcher() {
+	watch(`${path.html.src}/**/*.pug`, htmlGenerator)
+	watch(`${path.css.src}/**/*.scss`, styleGenerator)
+	watch(`${path.img.src}/**/*.*`, series(clearImg, imagesConverter))
+	watch(`${path.js.src}/**/*.js`, series(bandleJsGenerator, htmlGenerator, styleGenerator))
+}
+
+exports.build = series(
+	clear,
+	htmlGenerator,
+	styleGenerator,
+	bandleJsGenerator,
+	imagesConverter,
+)
+
+exports.default = series(
+	clear,
+	htmlGenerator,
+	styleGenerator,
+	bandleJsGenerator,
+	imagesConverter,
+	parallel(server, watcher),
+)
